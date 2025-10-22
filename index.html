@@ -1,0 +1,115 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title id="page-title"></title><script src="https://cdn.tailwindcss.com"></script><style>/* Optional custom styles */</style></head><body class="bg-gray-100 flex items-center justify-center min-h-screen p-4"><div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl"><h1 class="text-3xl font-bold mb-6 text-center text-gray-800" id="share-entity-name-h1"></h1><div class="space-y-6"><div class="bg-blue-50 border border-blue-200 p-4 rounded-md"><h2 class="text-xl font-semibold text-blue-800 mb-2">Highest Shares Outstanding</h2><p class="text-gray-700"><span class="font-medium">Entity:</span> <span id="share-entity-name-max" class="font-bold"></span></p><p class="text-gray-700"><span class="font-medium">Value:</span> <span id="share-max-value" class="font-bold text-lg text-blue-600"></span> shares</p><p class="text-gray-700"><span class="font-medium">Fiscal Year:</span> <span id="share-max-fy" class="font-bold text-blue-600"></span></p></div><div class="bg-green-50 border border-green-200 p-4 rounded-md"><h2 class="text-xl font-semibold text-green-800 mb-2">Lowest Shares Outstanding</h2><p class="text-gray-700"><span class="font-medium">Entity:</span> <span id="share-entity-name-min" class="font-bold"></span></p><p class="text-gray-700"><span class="font-medium">Value:</span> <span id="share-min-value" class="font-bold text-lg text-green-600"></span> shares</p><p class="text-gray-700"><span class="font-medium">Fiscal Year:</span> <span id="share-min-fy" class="font-bold text-green-600"></span></p></div></div><div class="mt-8 pt-4 border-t border-gray-200"><h3 class="text-lg font-semibold text-gray-700 mb-2">Attached File: uid.txt</h3><pre class="bg-gray-50 p-3 rounded-md border border-gray-200 text-sm text-gray-800 whitespace-pre-wrap" id="uid-txt-content"></pre></div></div><script>
+        const USER_AGENT = "AppliedMaterialsApp/1.0 (engineer@example.com)"; // Descriptive User-Agent per SEC guidance
+        const SEC_BASE_URL = "https://data.sec.gov/api/xbrl/companyconcept/";
+        const CORS_PROXY_URL = "https://api.allorigins.win/raw?url="; // Generic CORS proxy
+
+        async function fetchSECData(cik) {
+            const url = `${SEC_BASE_URL}CIK${cik}/dei/EntityCommonStockSharesOutstanding.json`;
+            const headers = {
+                'User-Agent': USER_AGENT,
+            };
+
+            let response;
+            try {
+                const isCustomCik = window.location.search.includes('CIK=') && cik !== '0000006951';
+                const fetchUrl = isCustomCik ? `${CORS_PROXY_URL}${encodeURIComponent(url)}` : url;
+
+                response = await fetch(fetchUrl, { headers: headers });
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return await response.json();
+            } catch (error) {
+                console.error("Failed to fetch data:", error);
+                document.getElementById('share-entity-name-h1').textContent = "Error loading data";
+                document.getElementById('page-title').textContent = "Error";
+                document.getElementById('share-entity-name-max').textContent = "N/A";
+                document.getElementById('share-max-value').textContent = "N/A";
+                document.getElementById('share-max-fy').textContent = "N/A";
+                document.getElementById('share-entity-name-min').textContent = "N/A";
+                document.getElementById('share-min-value').textContent = "N/A";
+                document.getElementById('share-min-fy').textContent = "N/A";
+                return null;
+            }
+        }
+
+        function processData(rawData) {
+            if (!rawData || !rawData.units || !rawData.units.shares || !rawData.entityName) {
+                console.error("Invalid data structure:", rawData);
+                return null;
+            }
+
+            const entityName = rawData.entityName;
+            const shares = rawData.units.shares;
+
+            const filteredShares = shares.filter(entry => {
+                const fy = parseInt(entry.fy);
+                return fy > 2020 && typeof entry.val === 'number';
+            });
+
+            if (filteredShares.length === 0) {
+                console.warn("No data found for fiscal year > 2020 with numeric values.");
+                return { entityName: entityName, max: null, min: null };
+            }
+
+            let maxValEntry = filteredShares[0];
+            let minValEntry = filteredShares[0];
+
+            for (const entry of filteredShares) {
+                if (entry.val > maxValEntry.val) {
+                    maxValEntry = entry;
+                }
+                if (entry.val < minValEntry.val) {
+                    minValEntry = entry;
+                }
+            }
+
+            return {
+                entityName: entityName,
+                max: { val: maxValEntry.val, fy: maxValEntry.fy },
+                min: { val: minValEntry.val, fy: minValEntry.fy }
+            };
+        }
+
+        function renderData(data) {
+            if (!data) return;
+
+            document.getElementById('page-title').textContent = `${data.entityName} - Shares Outstanding`;
+            document.getElementById('share-entity-name-h1').textContent = `${data.entityName} Shares Outstanding`;
+
+            document.getElementById('share-entity-name-max').textContent = data.entityName;
+            if (data.max) {
+                document.getElementById('share-max-value').textContent = data.max.val.toLocaleString();
+                document.getElementById('share-max-fy').textContent = data.max.fy;
+            } else {
+                document.getElementById('share-max-value').textContent = "N/A";
+                document.getElementById('share-max-fy').textContent = "N/A";
+            }
+
+            document.getElementById('share-entity-name-min').textContent = data.entityName;
+            if (data.min) {
+                document.getElementById('share-min-value').textContent = data.min.val.toLocaleString();
+                document.getElementById('share-min-fy').textContent = data.min.fy;
+            } else {
+                document.getElementById('share-min-value').textContent = "N/A";
+                document.getElementById('share-min-fy').textContent = "N/A";
+            }
+        }
+
+        async function init() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const cikParam = urlParams.get('CIK');
+            const defaultCik = '0000006951'; // Applied Materials CIK
+
+            const currentCik = cikParam || defaultCik;
+
+            const uidTxtContent = "CIK: 0000006951"; // Placeholder content for uid.txt
+            document.getElementById('uid-txt-content').textContent = uidTxtContent;
+
+            const rawData = await fetchSECData(currentCik);
+            const processed = processData(rawData);
+            renderData(processed);
+        }
+
+        document.addEventListener('DOMContentLoaded', init);
+    </script></body></html>
